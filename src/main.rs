@@ -2,14 +2,12 @@
 
 use std::{
     alloc::{alloc_zeroed, dealloc, Layout},
-    cmp::min,
     fmt::{Debug, Display, Formatter, Result as Result_},
     ptr::{copy, read, write},
-    mem::size_of,
 };
 
 fn get_next_pow2(num: usize) -> usize {
-    let mut n = num;
+    let mut n = num as u64;
     if n == 0 {
         return 1;
     }
@@ -19,7 +17,7 @@ fn get_next_pow2(num: usize) -> usize {
     n |= n >> 8;
     n |= n >> 16;
     n |= n >> 32;
-    return n + 1;
+    return (n + 1) as usize;
 }
 
 struct Array<T>
@@ -50,9 +48,9 @@ impl<T: Display + Copy + PartialEq> Array<T> {
         return Self::from_vec(&mut v);
     }
 
-    unsafe fn from_vec(v: &mut Vec<T>) -> Array<T> {
+    unsafe fn from_vec(v: &Vec<T>) -> Array<T> {
         let arr = Array::new(v.len());
-        copy(v.as_mut_ptr(), arr.ptr, v.len());
+        copy(v.as_ptr(), arr.ptr, v.len());
         return arr;
     }
 
@@ -64,7 +62,6 @@ impl<T: Display + Copy + PartialEq> Array<T> {
 
     unsafe fn resize(&mut self, size: usize) {
         let buf = self.copy();
-        eprintln!("buf: {:?};\nself: {:?};", buf, self);
 
         dealloc(self.ptr as *mut u8, Layout::array::<T>(self.size).unwrap());
 
@@ -72,11 +69,7 @@ impl<T: Display + Copy + PartialEq> Array<T> {
         self.size = size;
 
         copy(buf.ptr, self.ptr, size);
-        for offset in 0..size + 20 {
-            let addr = (buf.ptr as usize + (offset * std::mem::size_of::<T>())) as *mut i32;
-            eprintln!("data at {:p}: {} -> {:b}", addr, read(addr), read(addr));
-        }
-        eprintln!("buf: {:?};\nself: {:?};", buf, self);
+
         // I could use realloc (below) but I want to clear the memory where I want to move the data to
         // realloc(self.ptr as *mut u8, Layout::array::<T>(self.size).unwrap(), size);
     }
@@ -236,17 +229,13 @@ impl<T: Copy + Display + PartialEq> ArrayList<T> {
     }
 
 
-    // unsafe fn from_vec(v: &Vec<T>) -> ArrayList<T> {
-    //     let len = v.len();
-    //     let cap = get_next_pow2(len);
-    //     let mut array = ArrayList {
-    //         arr: Array::from_vec(v),
-    //         len: len,
-    //         cap: cap,
-    //     };
-    //     array.arr.resize(cap);
-    //     return array;
-    // }
+    unsafe fn from_vec(v: &Vec<T>) -> ArrayList<T> {
+        ArrayList {
+            arr: Array::from_vec(v),
+            len: v.len(),
+            cap: v.len(),
+        }
+    }
 
     unsafe fn get(&self, index: usize) -> T {
         match self.arr.get(index) {
@@ -255,14 +244,21 @@ impl<T: Copy + Display + PartialEq> ArrayList<T> {
         }
     }
 
+    unsafe fn set(&self, index: usize, value: T) -> Result<(), String> {
+        self.arr.set(index, value)
+    }
+
     unsafe fn push(&mut self, index: usize, value: T) {
-        self.len += 1;
         if self.len >= self.cap {
             self.cap = get_next_pow2(self.cap);
             self.arr.resize(self.cap);
         }
-        // self.arr.shift_from(index, 1);
-        self.arr.set(index, value);
+        self.arr.shift_from(index, 1);
+        match self.arr.set(index, value) {
+            Err(e) => panic!(e),
+            _      => (),
+        };
+        self.len += 1;
     }
 
     unsafe fn push_front(&mut self, value: T) {
@@ -274,29 +270,20 @@ impl<T: Copy + Display + PartialEq> ArrayList<T> {
     }
 
     unsafe fn pop(&mut self, index: usize) -> Result<T, String> {
-        if self.len == 0 || index > self.len {
-            Err(format!(
-                "Unable to pop at index {}, out of range (0..{})",
-                index, self.len
-            ))
+        if self.len < self.cap / 2 {
+            self.cap = self.cap / 2;
+        } if index > self.len {
+            Err(format!("index {} out of range: 0..{}", index, self.len))
         } else {
-            let output = self.get(index);
+            let out: T = match self.arr.get(index) {
+                Ok(n)  => n,
+                Err(e) => panic!(e),
+            };
 
-            eprintln!("{}", index + 1);
-
-            // self.arr.shift_from(index + 1, -1);
+            self.arr.shift_from(index, -1);
             self.len -= 1;
 
-            if self.len < self.cap / 2 {
-                let lower_pow2 = if self.arr.size > 1 {
-                    self.arr.size / 2
-                } else {
-                    1
-                };
-                self.arr.resize(lower_pow2);
-            }
-
-            Ok(output)
+            Ok(out)
         }
     }
 
@@ -326,7 +313,7 @@ impl<T: Copy + Debug + Display + PartialEq> Debug for ArrayList<T> {
     fn fmt(&self, f: &mut Formatter) -> Result_ {
         write!(
             f,
-            "ArrayList at {:p}:\n\tdata: {};\n\tlen: {};\n\tcap: {}",
+            "ArrayList at {:p}:\n\tdata: {};\n\tlen: {};\n\tcap: {};",
             self.arr.ptr, self, self.len, self.cap
         )
     }
@@ -343,23 +330,5 @@ impl<T: Copy + Display + PartialEq> IntoIterator for ArrayList<T> {
 
 fn main() {
     unsafe {
-
-        let mut b = Array::from_vec(&mut vec![1, 2, 3, 4, 5, 6, 7, 8]);
-        eprintln!("\nBefore: b: {:?}; b -> {:p}", b, b.ptr);
-
-        let (index, amt) = (4, -2);
-        eprintln!("b.shift_from({}, {});", index, amt);
-
-        b.shift_from(index, amt);
-        eprintln!("After b: {:?}; b -> {:p}\n", b, b.ptr);
-
-        let mut c = Array::from_vec(&mut vec![1, 2, 3, 4, 5, 6, 7, 8]);
-        eprintln!("\nBefore: c: {:?}; c -> {:p}", c, c.ptr);
-
-        let (index, amt) = (0, 8);
-        eprintln!("c.shift_from({}, {});", index, amt);
-
-        c.shift_from(index, amt);
-        eprintln!("After c: {:?}; c -> {:p}\n", c, c.ptr);
     }
 }
