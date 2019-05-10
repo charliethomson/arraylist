@@ -5,6 +5,7 @@ use std::{
     cmp::min,
     fmt::{Debug, Display, Formatter, Result as Result_},
     ptr::{copy, read, write},
+    mem::size_of,
 };
 
 fn get_next_pow2(num: usize) -> usize {
@@ -34,71 +35,7 @@ impl<T: Display + Copy + PartialEq> Array<T> {
         copy(arr, buf.ptr, size);
         buf
     }
-}
-impl<T: Copy + Display + std::fmt::Binary> Array<T> {
-    unsafe fn shift_from(&mut self, index: usize, amt: isize) {
-        if amt == 0 {
-            return;
-        }
-
-        let buf = self.copy();
-        self.clear();
-
-        
-
-        if amt < 0 {
-            let n: usize = (index as isize + amt) as usize;
-
-            copy(buf.ptr, self.ptr, n);
-            copy(
-                (buf.ptr as usize + index * std::mem::size_of::<T>()) as *mut T,
-                (self.ptr as usize + n * std::mem::size_of::<T>()) as *mut T,
-                (buf.size as isize + amt) as usize,
-            );
-
-        } else {
-            copy(buf.ptr, self.ptr, index + 1);
-            copy(
-                (buf.ptr as usize + (index + amt as usize) * std::mem::size_of::<T>()) as *mut T,
-                (self.ptr as usize + index * std::mem::size_of::<T>()) as *mut T,
-                {
-                    5
-                }
-            )
-        }
-
-
-        // let buf = self.copy();
-        // self.clear();
-        // for i in 0..buf.len() {
-        //     if (i as isize) < (index as isize + amt) {
-        //         if amt < 0 {
-        //             let buf_val = if (i as isize) < amt {
-        //                 continue;
-        //             } else {
-        //                 buf.get(((i as isize) + amt) as usize).unwrap()
-        //             };
-
-        //             self.set(i, buf_val).unwrap();
-        //         } else {
-        //             continue;
-        //         }
-        //     } else if i < index {
-        //         self.set(i, buf.get(index).unwrap()).unwrap();
-        //     } else {
-        //         let buf_val = if (i as isize) < amt {
-        //             continue;
-        //         } else {
-        //             buf.get(((i as isize) + amt) as usize).unwrap()
-        //         };
-
-        //         self.set(i, buf_val).unwrap();
-        //     }
-        // }
-
-    }
-}
-impl<T: Copy + Display> Array<T> {
+} impl<T: Copy + Display> Array<T> {
     unsafe fn new(size: usize) -> Array<T> {
         let layout = Layout::array::<T>(size).unwrap();
         let ptr: *mut T = alloc_zeroed(layout) as *mut T;
@@ -178,6 +115,52 @@ impl<T: Copy + Display> Array<T> {
         } else {
             write(self.ptr.add(index), value);
             Ok(())
+        }
+    }
+
+    unsafe fn shift_from(&mut self, index: usize, amt: isize) {
+        if amt == 0 {
+            return;
+        }
+
+        let buf = self.copy();
+        self.clear();
+
+        
+
+        return if amt < 0 {
+            // before the shift items
+            copy(
+                buf.ptr,
+                self.ptr,
+                index - amt.abs() as usize
+            );
+
+            // the rest of the items
+            copy(
+                buf.ptr.add(index),
+                self.ptr.add(index - amt.abs() as usize),
+                buf.len() -index,                
+            );
+
+        } else {
+            // before the gap
+            copy(
+                buf.ptr,
+                self.ptr, 
+                index,
+            );
+
+            // the rest, maybe
+            if index + (amt as usize) < buf.len() {
+                copy(
+                    buf.ptr.add(index),
+                    self.ptr.add(index + amt as usize),
+                    {
+                        buf.len() - index - amt as usize
+                    }
+                );
+            }
         }
     }
 
@@ -360,19 +343,23 @@ impl<T: Copy + Display + PartialEq> IntoIterator for ArrayList<T> {
 
 fn main() {
     unsafe {
-        // let mut a = Array::<i32>::new(4);
-        // a.resize(7);
 
         let mut b = Array::from_vec(&mut vec![1, 2, 3, 4, 5, 6, 7, 8]);
-        eprintln!("Before: b: {:?}; b -> {:p}", b, b.ptr);
+        eprintln!("\nBefore: b: {:?}; b -> {:p}", b, b.ptr);
 
         let (index, amt) = (4, -2);
         eprintln!("b.shift_from({}, {});", index, amt);
 
         b.shift_from(index, amt);
-        // let c = a.copy();
-        // eprintln!("a: {:?}; a -> {:p}", a, a.ptr);
-        eprintln!("After b: {:?}; b -> {:p}", b, b.ptr);
-        // eprintln!("c: {:?}; c -> {:p}", c, c.ptr);
+        eprintln!("After b: {:?}; b -> {:p}\n", b, b.ptr);
+
+        let mut c = Array::from_vec(&mut vec![1, 2, 3, 4, 5, 6, 7, 8]);
+        eprintln!("\nBefore: c: {:?}; c -> {:p}", c, c.ptr);
+
+        let (index, amt) = (0, 8);
+        eprintln!("c.shift_from({}, {});", index, amt);
+
+        c.shift_from(index, amt);
+        eprintln!("After c: {:?}; c -> {:p}\n", c, c.ptr);
     }
 }
